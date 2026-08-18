@@ -168,8 +168,17 @@ def main():
         "--bidirectional", action="store_true", 
         help="Automatically generate return traffic paths (dst-nodes -> src-nodes)."
     )
+    parser.add_argument(
+        "--stop", action="store_true",
+        help="Stop and kill all running wireblast processes on all participating containers."
+    )
 
     args = parser.parse_args()
+
+    # Normalize duration to append 's' if a pure integer/digit is passed
+    duration = str(args.duration)
+    if duration.isdigit():
+        duration += "s"
 
     raw_src_nodes = args.src_nodes if args.src_nodes else DEFAULT_SRC_NODES
     raw_dst_nodes = args.dst_nodes if args.dst_nodes else DEFAULT_DST_NODES
@@ -185,10 +194,28 @@ def main():
     print(f"Destinations: {', '.join(dst_nodes)}")
     print(f"Binary:       {args.binary}")
     print(f"PPS Rate:     {args.pps}")
-    print(f"Duration:     {args.duration}")
+    print(f"Duration:     {duration}")
     if args.dry_run:
         print("Mode:         DRY-RUN (Simulating commands only)")
     print("=" * 75)
+
+    if args.stop:
+        print("\033[1;34m[SYSTEM]\033[0m Stopping and killing all wireblast processes...")
+        # Get unique list of all participating containers
+        all_participating = list(set(src_nodes + dst_nodes))
+        for node in all_participating:
+            kill_cmd = ["docker", "exec", "-u", "0", node, "pkill", "-f", "wireblast"]
+            if args.dry_run:
+                print(f"[DRY-RUN] Would stop wireblast on {node}: {' '.join(kill_cmd)}")
+                continue
+            res = subprocess.run(kill_cmd, capture_output=True, text=True)
+            # pkill returns 0 if matches are killed, 1 if no processes matched
+            if res.returncode == 0:
+                print(f" [\033[92mSTOPPED\033[0m] Terminated running wireblast processes on {node}.")
+            else:
+                print(f" [\033[90mIDLE\033[0m] No running wireblast processes found on {node}.")
+        print("\033[1;34m[SYSTEM]\033[0m Teardown complete.\n")
+        sys.exit(0)
 
     if args.deploy:
         nodes_to_deploy = list(set(src_nodes + dst_nodes))
@@ -239,7 +266,7 @@ def main():
             src_ip=src_ip,
             dst_ip=dst_ip,
             pps=args.pps,
-            duration=args.duration,
+            duration=duration,
             dry_run=args.dry_run
         )
         if status:
